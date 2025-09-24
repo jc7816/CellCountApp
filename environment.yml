@@ -1,0 +1,12 @@
+name: cellpose_app  # Name of the conda environment
+channels:
+  - conda-forge     # Use conda-forge as the primary channel
+  - defaults
+dependencies:
+  - python=3.11     # Specify Python version
+  - cellpose        # Cellpose for cell segmentation
+  - numpy           # Numerical computing library
+  - matplotlib      # Plotting and visualization
+  - scikit-image    # Image processing library
+  - pip             # Include pip for installing pip-only packages
+  - pip:
