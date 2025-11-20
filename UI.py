@@ -1,40 +1,44 @@
+# UI.py — Clean version, no scale bar, no diameter input.
 from PyQt5.QtWidgets import (
     QMainWindow, QWidget, QLabel, QPushButton, QVBoxLayout,
-    QHBoxLayout, QLineEdit, QComboBox, QFileDialog, QMessageBox, QApplication
+    QHBoxLayout, QComboBox, QFileDialog, QMessageBox, QApplication
 )
 from PyQt5.QtGui import QPixmap
 from PyQt5.QtCore import Qt
 import os
-import torch
 from worker import ProcessingThread
 
+
 class CellposeApp(QMainWindow):
+    """PyQt5 application for Cellpose-based segmentation with threaded worker (CPU-only)."""
     def __init__(self):
         super().__init__()
 
-        # 1) 窗口标题改名为 Cell Count
+        # Window title
         self.setWindowTitle("Cell Count")
         self.setGeometry(200, 200, 1000, 700)
 
+        # State
         self.processing_thread = None
         self.current_image = None
         self.output_folder = None
         self.is_processing = False
 
+        # Root widget and main layout
         self.central_widget = QWidget()
         self.setCentralWidget(self.central_widget)
         self.layout = QVBoxLayout()
 
-        # 预览区域：左右对比（左：原图，右：分割结果）
+        # --- Preview row: input on left, result on right ---
         self.preview_row = QHBoxLayout()
 
-        # 左侧原图（带拖拽提示）
+        # Input image area
         self.image_label = QLabel("Drag & Drop or Click to Upload Image")
         self.image_label.setAlignment(Qt.AlignCenter)
         self.image_label.setStyleSheet("border: 2px dashed gray;")
         self.image_label.setFixedHeight(320)
 
-        # 右侧结果图（初始为空）
+        # Result image area
         self.result_label = QLabel("Result will appear here")
         self.result_label.setAlignment(Qt.AlignCenter)
         self.result_label.setStyleSheet("border: 2px dashed gray; color: gray; font-style: italic;")
@@ -44,31 +48,36 @@ class CellposeApp(QMainWindow):
         self.preview_row.addWidget(self.result_label, 1)
         self.layout.addLayout(self.preview_row)
 
-        # 启用拖拽到窗口
+        # Inline result info
+        self.result_info = QLabel("Cells: —")
+        self.result_info.setAlignment(Qt.AlignCenter)
+        self.result_info.setStyleSheet("""
+            QLabel {
+                border: 1px solid #888;
+                padding: 6px 10px;
+                font-weight: 700;
+                color: #222;
+                background: #f6f6f6;
+                border-radius: 6px;
+            }
+        """)
+        self.layout.addWidget(self.result_info)
+
+        # Accept drag & drop on the window
         self.setAcceptDrops(True)
 
-        # 上传按钮
-        self.upload_button = QPushButton("Upload Image")
-        self.upload_button.clicked.connect(self.upload_image)
-        self.layout.addWidget(self.upload_button)
-
-        # Diameter 输入
-        diameter_layout = QHBoxLayout()
-        diameter_layout.addWidget(QLabel("Estimated Diameter (px):"))
-        self.diameter_input = QLineEdit()
-        diameter_layout.addWidget(self.diameter_input)
-        self.layout.addLayout(diameter_layout)
-
-        # 模型下拉
+        # Model selector (translated to user-friendly choices)
         model_layout = QHBoxLayout()
-        model_layout.addWidget(QLabel("Select Model:"))
+        model_layout.addWidget(QLabel("What do you want to segment?"))
         self.model_select = QComboBox()
-        # 你当前 cellpose 1.0.2 建议用 cyto/nuclei，UI 可以保留 cyto2；worker 会必要时回退
-        self.model_select.addItems(["cyto", "nuclei", "cyto2"])
+        self.model_select.addItems([
+            "Whole cells (cytoplasm + nuclei)",  # → cyto
+            "Nuclei only"                        # → nuclei
+        ])
         model_layout.addWidget(self.model_select)
         self.layout.addLayout(model_layout)
 
-        # 输出文件夹（按钮 + 路径显示）
+        # Output folder (button + label)
         output_layout = QHBoxLayout()
         output_layout.addWidget(QLabel("Output Folder:"))
         self.output_button = QPushButton("Choose Folder")
@@ -79,9 +88,10 @@ class CellposeApp(QMainWindow):
         self.output_path_label.setStyleSheet("color: gray; font-style: italic;")
         self.output_path_label.setWordWrap(True)
         output_layout.addWidget(self.output_path_label)
+
         self.layout.addLayout(output_layout)
 
-        # 开始 & 取消
+        # Start / Cancel row
         btn_row = QHBoxLayout()
         self.start_button = QPushButton("Start Analysis")
         self.start_button.clicked.connect(self.start_analysis)
@@ -95,7 +105,7 @@ class CellposeApp(QMainWindow):
         self.layout.addLayout(btn_row)
         self.central_widget.setLayout(self.layout)
 
-    # ---------------- Drag & Drop ----------------
+    # ---------- Drag & Drop ----------
     def dragEnterEvent(self, event):
         if event.mimeData().hasUrls():
             event.acceptProposedAction()
@@ -105,45 +115,60 @@ class CellposeApp(QMainWindow):
             fname = event.mimeData().urls()[0].toLocalFile()
             self.load_image(fname)
 
-    # ---------------- UI slots ----------------
+    # ---------- Make image area clickable ----------
+    def mousePressEvent(self, event):
+        """Allow clicking the left image area to open file dialog."""
+        if event.button() == Qt.LeftButton:
+            widget_pos = self.central_widget.mapFrom(self, event.pos())
+            if self.image_label.geometry().contains(widget_pos):
+                self.upload_image()
+        super().mousePressEvent(event)
+
+    # ---------- UI slots ----------
     def upload_image(self):
-        """Load an image and show in preview"""
-        fname, _ = QFileDialog.getOpenFileName(self, "Select Image", "", "Images (*.png *.jpg *.tif *.tiff)")
+        """Open a file dialog to select an image."""
+        fname, _ = QFileDialog.getOpenFileName(
+            self, "Select Image", "", "Images (*.png *.jpg *.tif *.tiff)"
+        )
         if fname:
             self.load_image(fname)
 
     def load_image(self, fname):
-        """Helper to set current image"""
+        """Set current image and update the preview."""
         self.current_image = fname
         pixmap = QPixmap(fname)
-        self.image_label.setPixmap(
-            pixmap.scaled(self.image_label.width(), self.image_label.height(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        scaled = pixmap.scaled(
+            self.image_label.width(),
+            self.image_label.height(),
+            Qt.KeepAspectRatio,
+            Qt.SmoothTransformation
         )
-        # 4) 上传完图片后，去掉虚线提示
-        self.image_label.setStyleSheet("")           # 去掉边框
-        self.image_label.setText("")                 # 去掉文字
-        # 显示前一次结果可能保留，若想清空右侧可解除下行注释
-        # self.clear_result_preview()
+        self.image_label.setPixmap(scaled)
+        self.image_label.setStyleSheet("")
+        self.image_label.setText("")
 
     def select_output_folder(self):
-        """Choose an output directory"""
+        """Open a folder dialog and show the selected path inline."""
         folder = QFileDialog.getExistingDirectory(self, "Select Output Folder")
         if folder:
             self.output_folder = folder
             self.output_path_label.setText(folder)
             self.output_path_label.setStyleSheet("color: green; font-weight: bold;")
-            # 强制刷新，确保实时显示
             self.output_path_label.adjustSize()
             self.output_path_label.repaint()
             QApplication.processEvents()
 
+    def get_model_type(self):
+        """Map user-friendly combo choice to internal Cellpose model name."""
+        idx = self.model_select.currentIndex()
+        return "cyto" if idx == 0 else "nuclei"
+
     def start_analysis(self):
-        """Start processing in a background thread"""
+        """Start background segmentation. Requires image and output folder."""
         if self.is_processing:
             QMessageBox.warning(self, "Warning", "Processing already running!")
             return
 
-        # 无图像
         if not self.current_image:
             QMessageBox.warning(self, "Warning", "Please upload an image first!")
             return
@@ -151,82 +176,72 @@ class CellposeApp(QMainWindow):
             QMessageBox.critical(self, "Error", f"File not found: {self.current_image}")
             return
 
-        # 2) 未选择输出文件夹 -> 与未选图片相同逻辑，弹警告
         if not self.output_folder or not os.path.isdir(self.output_folder):
             QMessageBox.warning(self, "Warning", "Please choose an output folder first!")
             return
 
-        # 警告 CPU 运行
-        if not torch.cuda.is_available():
-            QMessageBox.warning(self, "Warning", "No GPU detected. Running on CPU. This may be slow.")
+        # Diameter removed → always None
+        diameter = None
 
-        diameter_text = self.diameter_input.text()
-        try:
-            diameter = float(diameter_text) if diameter_text else None
-        except ValueError:
-            QMessageBox.warning(self, "Warning", "Diameter must be a number.")
-            return
-
-        model = self.model_select.currentText()
-        output_folder = self.output_folder
+        model = self.get_model_type()
 
         self.is_processing = True
         self.start_button.setEnabled(False)
         self.cancel_button.setEnabled(True)
 
-        # 清空右侧结果框的虚线并提示“处理中”（可选）
         self.result_label.setStyleSheet("color: gray;")
         self.result_label.setText("Processing...")
 
-        self.processing_thread = ProcessingThread(self.current_image, diameter, model, output_folder)
+        self.processing_thread = ProcessingThread(
+            self.current_image, diameter, model, self.output_folder
+        )
         self.processing_thread.finished.connect(self.on_processing_finished)
         self.processing_thread.error.connect(self.on_processing_error)
         self.processing_thread.start()
 
     def on_processing_finished(self, results):
-        """Handle finished processing"""
+        """Handle successful completion: show overlay/mask and inline count."""
         self.is_processing = False
         self.start_button.setEnabled(True)
         self.cancel_button.setEnabled(False)
 
-        # 结果信息
-        cell_count = results.get("cell_count", 0)
-        msg = f"Processing finished!\nCell count: {cell_count}"
-        if "note" in results:
-            msg += f"\n\nNOTE: {results['note']}"
-        QMessageBox.information(self, "Done", msg)
-
-        # 3) 左右对比：右侧显示 overlay（如果有），否则显示 mask
-        show_path = results.get("overlay_path") or results.get("mask_path") or results.get("output_path")
+        show_path = results.get("overlay_path") or results.get("mask_path")
         if show_path and os.path.exists(show_path):
             pix = QPixmap(show_path)
             self.result_label.setPixmap(
-                pix.scaled(self.result_label.width(), self.result_label.height(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                pix.scaled(
+                    self.result_label.width(),
+                    self.result_label.height(),
+                    Qt.KeepAspectRatio,
+                    Qt.SmoothTransformation
+                )
             )
-            self.result_label.setStyleSheet("")   # 去掉虚线
+            self.result_label.setStyleSheet("")
             self.result_label.setText("")
         else:
             self.result_label.setText("No result image found.")
             self.result_label.setStyleSheet("color: red;")
 
+        cell_count = results.get("cell_count", 0)
+        self.result_info.setText(f"Cells: {cell_count}")
+
+        mask_path = results.get("mask_path")
+        if mask_path and os.path.exists(mask_path):
+            try:
+                os.remove(mask_path)
+            except Exception as e:
+                print(f"Warn: could not delete mask file: {e}")
+
     def on_processing_error(self, message):
-        """Handle errors during processing"""
         self.is_processing = False
         self.start_button.setEnabled(True)
         self.cancel_button.setEnabled(False)
         QMessageBox.critical(self, "Error", f"Processing failed: {message}")
 
     def cancel_analysis(self):
-        """Stop the processing thread"""
         if self.processing_thread and self.processing_thread.isRunning():
             self.processing_thread.stop()
             self.processing_thread.wait(1000)
         self.is_processing = False
         self.start_button.setEnabled(True)
         self.cancel_button.setEnabled(False)
-
-    # 可选：清空右侧结果
-    def clear_result_preview(self):
-        self.result_label.clear()
-        self.result_label.setText("Result will appear here")
-        self.result_label.setStyleSheet("border: 2px dashed gray; color: gray; font-style: italic;")

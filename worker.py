@@ -1,36 +1,37 @@
-# worker.py  —  Cellpose v1.0.2 兼容版（带叠加图输出）
+# worker.py — Cellpose v1.0.2 compatible worker with overlay output (models: cyto / nuclei)
 import os
 import numpy as np
 from PyQt5.QtCore import QThread, pyqtSignal
-
 from cellpose import models, io, utils
 
+
 class ProcessingThread(QThread):
-    finished = pyqtSignal(object)   # dict: {cell_count, mask_path, overlay_path, note?}
-    error = pyqtSignal(str)
+    """Background processing thread that runs Cellpose segmentation."""
+    finished = pyqtSignal(object)   # Emits dict: {cell_count, mask_path, overlay_path}
+    error = pyqtSignal(str)         # Emits error message
 
     def __init__(self, image_path, diameter=None, model="cyto", output_folder="."):
         super().__init__()
         self.image_path = image_path
         self.diameter = diameter
-        self.model = (model or "cyto")
+        self.model = model  # expected: "cyto" or "nuclei"
         self.output_folder = output_folder or "."
         self._is_running = True
 
     def run(self):
         try:
-            # ---------- 基础校验 ----------
+            # --- Basic checks ---
             if not self.image_path or not os.path.exists(self.image_path):
-                raise ValueError(f"找不到图像文件：{self.image_path}")
+                raise ValueError(f"Image file not found: {self.image_path}")
 
             os.makedirs(self.output_folder, exist_ok=True)
 
-            # ---------- 读图 ----------
+            # --- Read image ---
             img = io.imread(self.image_path)
             if img is None:
-                raise ValueError("无法读取输入图像（io.imread 返回 None）")
+                raise ValueError("Failed to read image (io.imread returned None)")
 
-            # ---------- GPU 检测（1.0.2 没有 models.use_gpu） ----------
+            # --- GPU check ---
             try:
                 import torch
                 use_gpu = bool(torch.cuda.is_available())
@@ -38,24 +39,17 @@ class ProcessingThread(QThread):
                 use_gpu = False
             print(f"[Worker] Using GPU: {use_gpu}")
 
-            # ---------- 选择模型类名（兼容 1.0.2 不同命名） ----------
+            # --- Select model class for 1.0.2 compatibility ---
             ModelClass = models.CellposeModel if hasattr(models, "CellposeModel") else models.Cellpose
 
-            # 1.0.2 通常只支持 'cyto' / 'nuclei'，UI 若传 'cyto2' 则回退
-            model_type = self.model
-            note = None
-            if model_type not in ("cyto", "nuclei"):
-                note = f"模型类型“{model_type}”在 Cellpose 1.0.2 可能不可用，已回退到 'cyto'"
-                model_type = "cyto"
+            cp_model = ModelClass(gpu=use_gpu, model_type=self.model)
 
-            cp_model = ModelClass(gpu=use_gpu, model_type=model_type)
-
-            # ---------- 分割 ----------
-            # 1.0.2 的 eval 通常返回 (masks, flows, styles)
+            # --- Segmentation ---
+            # In 1.0.2, eval usually returns (masks, flows, styles)
             masks, flows, styles = cp_model.eval(
                 [img],
                 diameter=self.diameter,
-                channels=[0, 0]   # 默认灰度；如需彩色通道可改 [2,3] 等
+                channels=[0, 0]  # default: grayscale. Adjust here if you need color channels.
             )
 
             if not self._is_running:
@@ -65,25 +59,22 @@ class ProcessingThread(QThread):
             mask = masks[0]
             cell_count = int(mask.max())
 
-            # ---------- 保存输出 ----------
+            # --- Save results ---
             base = os.path.splitext(os.path.basename(self.image_path))[0]
             mask_path = os.path.join(self.output_folder, f"{base}_masks.png")
             io.imsave(mask_path, mask.astype(np.uint16))
 
-            # --- 生成“原图+红色轮廓”叠加图，便于 UI 预览 ---
-            outlines = utils.masks_to_outlines(mask)  # 边界布尔图
-            overlay = self._make_overlay(img, outlines)  # 叠加红色边界
+            # Build overlay (original image + red outlines) for UI preview
+            outlines = utils.masks_to_outlines(mask)  # boolean boundary map
+            overlay = self._make_overlay(img, outlines)
             overlay_path = os.path.join(self.output_folder, f"{base}_overlay.png")
             io.imsave(overlay_path, overlay)
 
-            # ---------- 回传结果 ----------
             result = {
                 "cell_count": cell_count,
-                "mask_path": mask_path,
+                "mask_path": mask_path,        # UI will delete this after showing overlay
                 "overlay_path": overlay_path
             }
-            if note:
-                result["note"] = note
 
             print(f"[Worker] Done. Cells: {cell_count}")
             self.finished.emit(result)
@@ -94,33 +85,32 @@ class ProcessingThread(QThread):
             self.error.emit(str(e))
 
     def stop(self):
+        """Request the thread to stop (best-effort, cooperative)."""
         self._is_running = False
 
-    # ======= 辅助：做一个 RGB 叠加图（原图 + 红色轮廓） =======
+    # ---------- Helpers ----------
     def _make_overlay(self, img, outlines_bool):
         """
-        img: np.ndarray, (H,W) 灰度 或 (H,W,3) 彩色
-        outlines_bool: (H,W) True 表示边界像素
-        return: uint8 RGB
+        Create an RGB overlay image with red boundaries drawn on top of the original.
+        - img: np.ndarray, shape (H, W) or (H, W, C)
+        - outlines_bool: np.ndarray, shape (H, W), True indicates boundary pixels
+        Returns uint8 RGB array.
         """
-        # 规范到 [0,255] uint8 的 RGB
+        # Normalize to uint8 RGB
         if img.ndim == 2:
-            # 灰度 -> 3通道
             arr = self._to_uint8(img)
             rgb = np.stack([arr, arr, arr], axis=-1)
         else:
-            # 彩色
             rgb = self._to_uint8(img)
-            if rgb.shape[-1] == 4:   # RGBA -> RGB
+            if rgb.shape[-1] == 4:
                 rgb = rgb[..., :3]
 
-        # 叠加红色轮廓
         overlay = rgb.copy()
         overlay[outlines_bool] = np.array([255, 0, 0], dtype=np.uint8)
         return overlay
 
     def _to_uint8(self, a):
-        """把任意 dtype/范围的图像压到 0..255 的 uint8"""
+        """Scale any dtype/range image to 0..255 uint8."""
         a = np.asarray(a)
         if a.dtype == np.uint8:
             return a
