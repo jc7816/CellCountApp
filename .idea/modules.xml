@@ -2,7 +2,7 @@
 <project version="4">
   <component name="ProjectModuleManager">
     <modules>
-      <module fileurl="file://$PROJECT_DIR$/.idea/cellpose_app.iml" filepath="$PROJECT_DIR$/.idea/cellpose_app.iml" />
+      <module fileurl="file://$PROJECT_DIR$/.idea/cellpose_app_v1_gpu.iml" filepath="$PROJECT_DIR$/.idea/cellpose_app_v1_gpu.iml" />
     </modules>
   </component>
 </project>

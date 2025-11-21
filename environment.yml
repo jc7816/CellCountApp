@@ -1,12 +1,26 @@
-name: cellpose_app  # Name of the conda environment
+name: cellpose_cpu
 channels:
-  - conda-forge     # Use conda-forge as the primary channel
+  - pytorch
+  - conda-forge
   - defaults
+
 dependencies:
-  - python=3.11     # Specify Python version
-  - cellpose        # Cellpose for cell segmentation
-  - numpy           # Numerical computing library
-  - matplotlib      # Plotting and visualization
-  - scikit-image    # Image processing library
-  - pip             # Include pip for installing pip-only packages
-  - pip:
+  - python=3.8
+  - numpy>=1.20
+  - numba>=0.43.1
+  - scipy
+  - scikit-image
+  - opencv
+  - pyqt
+  - pyqtgraph>=0.11.0rc0
+  - natsort
+  - tqdm
+  - tifffile
+  - fastremap
+  - cellpose==1.0.2
+  - matplotlib
+
+  # CPU-only PyTorch (no CUDA)
+  - pytorch=1.10.2
+  - torchvision
+  - torchaudio
