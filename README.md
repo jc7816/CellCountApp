@@ -82,9 +82,8 @@ Steps:
 
 - GPU acceleration
 - Batch processing
-- More models
+- Stronger models
 - Morphology metrics
-- Folder handling
 - .exe packaging
 
 ## 📚 8. References
@@ -93,5 +92,6 @@ Stringer et al. (2021). Cellpose: a generalist algorithm for cellular segmentati
 Nature Methods.
 
 https://github.com/MouseLand/cellpose
+
 
 
