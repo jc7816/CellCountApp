@@ -1,8 +1,8 @@
 name: cellpose_cpu
 channels:
-  - pytorch
   - conda-forge
   - defaults
+  - pytorch
 
 dependencies:
   - python=3.8
@@ -20,7 +20,8 @@ dependencies:
   - cellpose==1.0.2
   - matplotlib
 
-  # CPU-only PyTorch (no CUDA)
+  # Force CPU-only PyTorch (important on Windows)
   - pytorch=1.10.2
   - torchvision
   - torchaudio
+  - cpuonly
