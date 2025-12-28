@@ -156,6 +156,17 @@ class CellposeApp(QMainWindow):
         self.image_label.setPixmap(scaled)
         self.image_label.setStyleSheet("")
         self.image_label.setText("")
+        
+        self.result_info.setText("Cells: —    Mean area: —")
+
+    def reset_result_preview(self):
+        """Reset the result preview area to its initial placeholder state."""
+        self.result_label.clear()                 
+        self.result_label.setPixmap(QPixmap())    
+        self.result_label.setText("Segmentation Result will appear here")
+        self.result_label.setAlignment(Qt.AlignCenter)
+        self.result_label.setStyleSheet("border: 2px dashed gray; color: gray; font-style: italic;")
+
 
     def select_output_folder(self):
         """Open a folder dialog and show the selected path inline."""
@@ -211,7 +222,7 @@ class CellposeApp(QMainWindow):
         self.start_button.setEnabled(True)
         self.cancel_button.setEnabled(False)
 
-        # Show result image (prefer overlay, then mask)
+        # Show result image
         show_path = results.get("overlay_path") or results.get("mask_path")
         if show_path and os.path.exists(show_path):
             pix = QPixmap(show_path)
@@ -277,5 +288,7 @@ class CellposeApp(QMainWindow):
             self.processing_thread.stop()
             self.processing_thread.wait(1000)
         self.is_processing = False
+        self.result_label.setText("Segmentation Result will appear here")
+        self.result_info.setText("Cells: —    Mean area: —")
         self.start_button.setEnabled(True)
         self.cancel_button.setEnabled(False)
