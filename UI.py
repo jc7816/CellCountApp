@@ -1,4 +1,4 @@
-# UI.py — Clean UI with cell count and mean area (px^2 and µm^2), fixed model.
+
 from PyQt5.QtWidgets import (
     QMainWindow, QWidget, QLabel, QPushButton, QVBoxLayout,
     QHBoxLayout, QFileDialog, QMessageBox, QApplication, QLineEdit
@@ -11,11 +11,9 @@ from worker import ProcessingThread
 
 class CellposeApp(QMainWindow):
     """
-    PyQt5 application for Cellpose-based segmentation with threaded worker (CPU-only).
-
     Features:
         - Drag & drop or click to upload an image.
-        - Fixed Cellpose model (e.g. cyto) for simplicity.
+        - Fixed Cellpose model for simplicity.
         - Choose an output folder.
         - Optional pixel size input to convert mean area from px^2 to µm^2.
         - Run Cellpose in a background thread.
@@ -40,7 +38,7 @@ class CellposeApp(QMainWindow):
         self.setCentralWidget(self.central_widget)
         self.layout = QVBoxLayout()
 
-        # --- Preview row: input on left, result on right ---
+        # Preview row: input on left, result on right 
         self.preview_row = QHBoxLayout()
 
         # Input image area
@@ -127,16 +125,14 @@ class CellposeApp(QMainWindow):
 
     # ---------- Make image area clickable ----------
     def mousePressEvent(self, event):
-        """Allow clicking the left image area to open file dialog."""
         if event.button() == Qt.LeftButton:
             widget_pos = self.central_widget.mapFrom(self, event.pos())
             if self.image_label.geometry().contains(widget_pos):
                 self.upload_image()
         super().mousePressEvent(event)
 
-    # ---------- UI slots ----------
+    # ---------- UI ----------
     def upload_image(self):
-        """Open a file dialog to select an image."""
         fname, _ = QFileDialog.getOpenFileName(
             self, "Select Image", "", "Images (*.png *.jpg *.tif *.tiff)"
         )
@@ -144,7 +140,7 @@ class CellposeApp(QMainWindow):
             self.load_image(fname)
 
     def load_image(self, fname):
-        """Set current image and update the preview."""
+        """Set current image and update the preview"""
         self.current_image = fname
         pixmap = QPixmap(fname)
         scaled = pixmap.scaled(
@@ -156,11 +152,9 @@ class CellposeApp(QMainWindow):
         self.image_label.setPixmap(scaled)
         self.image_label.setStyleSheet("")
         self.image_label.setText("")
-        
         self.result_info.setText("Cells: —    Mean area: —")
 
     def reset_result_preview(self):
-        """Reset the result preview area to its initial placeholder state."""
         self.result_label.clear()                 
         self.result_label.setPixmap(QPixmap())    
         self.result_label.setText("Segmentation Result will appear here")
@@ -169,7 +163,6 @@ class CellposeApp(QMainWindow):
 
 
     def select_output_folder(self):
-        """Open a folder dialog and show the selected path inline."""
         folder = QFileDialog.getExistingDirectory(self, "Select Output Folder")
         if folder:
             self.output_folder = folder
@@ -180,7 +173,6 @@ class CellposeApp(QMainWindow):
             QApplication.processEvents()
 
     def start_analysis(self):
-        """Start background segmentation. Requires image and output folder."""
         if self.is_processing:
             QMessageBox.warning(self, "Warning", "Processing already running!")
             return
@@ -196,10 +188,9 @@ class CellposeApp(QMainWindow):
             QMessageBox.warning(self, "Warning", "Please choose an output folder first!")
             return
 
-        # Diameter removed → always None for now
         diameter = None
 
-        # Fixed model for now (e.g. cyto)
+        # Fixed model
         model = "cyto"
 
         self.is_processing = True
@@ -217,7 +208,6 @@ class CellposeApp(QMainWindow):
         self.processing_thread.start()
 
     def on_processing_finished(self, results):
-        """Handle successful completion: show overlay/mask and inline count + area."""
         self.is_processing = False
         self.start_button.setEnabled(True)
         self.cancel_button.setEnabled(False)
@@ -267,7 +257,7 @@ class CellposeApp(QMainWindow):
 
         self.result_info.setText(text)
 
-        # Auto-delete mask file after finishing (keep overlay for preview)
+        # Auto-delete mask file after finishing 
         mask_path = results.get("mask_path")
         if mask_path and os.path.exists(mask_path):
             try:
@@ -276,14 +266,12 @@ class CellposeApp(QMainWindow):
                 print(f"Warn: could not delete mask file: {e}")
 
     def on_processing_error(self, message):
-        """Handle errors from the worker."""
         self.is_processing = False
         self.start_button.setEnabled(True)
         self.cancel_button.setEnabled(False)
         QMessageBox.critical(self, "Error", f"Processing failed: {message}")
 
     def cancel_analysis(self):
-        """Request to stop the background worker."""
         if self.processing_thread and self.processing_thread.isRunning():
             self.processing_thread.stop()
             self.processing_thread.wait(1000)
