@@ -1,4 +1,4 @@
-# worker.py — CPU-only Cellpose v1.0.2 worker with mean cell area and overlay output
+
 import os
 import numpy as np
 from PyQt5.QtCore import QThread, pyqtSignal
@@ -31,13 +31,11 @@ class ProcessingThread(QThread):
 
     def run(self):
         try:
-            # --- Basic checks ---
             if not self.image_path or not os.path.exists(self.image_path):
                 raise ValueError(f"Image file not found: {self.image_path}")
 
             os.makedirs(self.output_folder, exist_ok=True)
 
-            # --- Read image ---
             img = io.imread(self.image_path)
             if img is None:
                 raise ValueError("Failed to read image (io.imread returned None)")
@@ -46,12 +44,10 @@ class ProcessingThread(QThread):
             use_gpu = False
             print(f"[Worker] Using GPU: {use_gpu}")
 
-            # --- Select model class for 1.0.2 compatibility ---
             ModelClass = models.CellposeModel if hasattr(models, "CellposeModel") else models.Cellpose
             cp_model = ModelClass(gpu=use_gpu, model_type=self.model)
 
             # --- Segmentation ---
-            # In 1.0.2, eval usually returns (masks, flows, styles)
             masks, flows, styles = cp_model.eval(
                 [img],
                 diameter=self.diameter,
@@ -67,7 +63,6 @@ class ProcessingThread(QThread):
             # ---- Compute cell_count and mean area in pixels ----
             # labels: unique values in mask, counts: number of pixels for each label
             labels, counts = np.unique(mask, return_counts=True)
-            # first label is usually background (0), skip it
             if labels.size > 0 and labels[0] == 0:
                 labels = labels[1:]
                 counts = counts[1:]
@@ -83,7 +78,7 @@ class ProcessingThread(QThread):
             mask_path = os.path.join(self.output_folder, f"{base}_masks.png")
             io.imsave(mask_path, mask.astype(np.uint16))
 
-            # Build overlay (original image + red outlines) for UI preview
+            # --- Build overlay preview ---
             outlines = utils.masks_to_outlines(mask)  # boolean boundary map
             overlay = self._make_overlay(img, outlines)
             overlay_path = os.path.join(self.output_folder, f"{base}_overlay.png")
@@ -105,22 +100,9 @@ class ProcessingThread(QThread):
             self.error.emit(str(e))
 
     def stop(self):
-        """Request the thread to stop (best-effort, cooperative)."""
         self._is_running = False
 
-    # ---------- Helpers ----------
     def _make_overlay(self, img, outlines_bool):
-        """
-        Create an RGB overlay image with red boundaries drawn on top of the original.
-
-        Args:
-            img (np.ndarray): shape (H, W) or (H, W, C)
-            outlines_bool (np.ndarray): shape (H, W), True indicates boundary pixels
-
-        Returns:
-            np.ndarray: uint8 RGB array
-        """
-        # Normalize to uint8 RGB
         if img.ndim == 2:
             arr = self._to_uint8(img)
             rgb = np.stack([arr, arr, arr], axis=-1)
@@ -134,7 +116,6 @@ class ProcessingThread(QThread):
         return overlay
 
     def _to_uint8(self, a):
-        """Scale any dtype/range image to 0..255 uint8."""
         a = np.asarray(a)
         if a.dtype == np.uint8:
             return a
